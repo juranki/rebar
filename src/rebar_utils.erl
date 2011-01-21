@@ -59,9 +59,21 @@ is_arch(ArchRegex) ->
     end.
 
 get_arch() ->
+    SysArch = case os:type() of
+                  {win32, _} ->
+                      OSType = os:getenv("OSTYPE"),
+                      Term = os:getenv("TERM"),
+                      Variant = if
+                                    OSType == "msys" -> "msys";
+                                    Term == "cygwin" -> "cygwin";
+                                    true -> "bare"
+                                end,
+                      Variant ++ "_" ++ erlang:system_info(system_architecture);
+                  _ ->
+                      erlang:system_info(system_architecture)
+              end,
     Words = integer_to_list(8 * erlang:system_info(wordsize)),
-    erlang:system_info(otp_release) ++ "-"
-        ++ erlang:system_info(system_architecture) ++ "-" ++ Words.
+    erlang:system_info(otp_release) ++ "-" ++ SysArch ++ "-" ++ Words.
 
 %%
 %% Options = [Option] -- defaults to [use_stdout, abort_on_error]
