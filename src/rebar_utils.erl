@@ -71,8 +71,8 @@ get_arch() ->
 %% Env = [{string(), Val}]
 %% Val = string() | false
 %%
-sh(Command0, Options0) ->
-    ?INFO("sh: ~s\n~p\n", [Command0, Options0]),
+sh(Command, Options0) ->
+    ?INFO("sh: ~s\n~p\n", [Command, Options0]),
 
     DefaultOptions = [use_stdout, abort_on_error],
     Options = [expand_sh_flag(V)
@@ -81,7 +81,6 @@ sh(Command0, Options0) ->
     ErrorHandler = proplists:get_value(error_handler, Options),
     OutputHandler = proplists:get_value(output_handler, Options),
 
-    Command = patch_on_windows(Command0),
     PortSettings = proplists:get_all_values(port_settings, Options) ++
         [exit_status, {line, 16384}, use_stdio, stderr_to_stdout, hide],
     Port = open_port({spawn, Command}, PortSettings),
@@ -91,20 +90,6 @@ sh(Command0, Options0) ->
             Ok;
         {error, Rc} ->
             ErrorHandler(Command, Rc)
-    end.
-
-%% We need a bash shell to execute on windows
-%% also the port doesn't seem to close from time to time (mingw)
-patch_on_windows(Cmd) ->
-    case os:type() of
-        {win32,nt} ->
-            case find_executable("bash") of
-                false -> Cmd;
-                Bash ->
-                    Bash ++ " -c \"" ++ Cmd ++ "; echo _port_cmd_status_ $?\" "
-            end;
-        _ ->
-            Cmd
     end.
 
 find_files(Dir, Regex) ->
