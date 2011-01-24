@@ -61,6 +61,14 @@
 %%               ERL_LDFLAGS - default -L and -lerl_interface -lei
 %%               DRV_CFLAGS  - flags that will be used for compiling the driver
 %%               DRV_LDFLAGS - flags that will be used for linking the driver
+%%               ERL_EI_LIBDIR - ei library directory
+%%               REBAR_CXX_TEMPLATE  - C++ command template
+%%               REBAR_CC_TEMPLATE   - C command template
+%%               REBAR_LINK_TEMPLATE - Linker command template
+%%               REBAR_PORT_IN_FILES - contains a space separated list of input
+%%                    file(s), (used in command template)
+%%               REBAR_PORT_OUT_FILE - contains the output filename (used in
+%%                    command template)
 %%
 %%               Note that if you wish to extend (vs. replace) these variables,
 %%               you MUST include a shell-style reference in your definition.
@@ -126,10 +134,10 @@ compile(Config, AppFile) ->
                       Intersection = sets:intersection(AllBins),
                       case needs_link(SoName, sets:to_list(Intersection)) of
                           true ->
-                              rebar_utils:sh(
-                                ?FMT("$CC ~s $LDFLAGS $DRV_LDFLAGS -o ~s",
-                                     [string:join(Bins, " "), SoName]),
-                                [{env, Env}]);
+                              rebar_utils:sh(expand_command("REBAR_LINK_TEMPLATE", Env,
+                                                            string:join(Bins, " "),
+                                                            SoName),
+                                             [{env, Env}]);
                           false ->
                               ?INFO("Skipping relink of ~s\n", [SoName]),
                               ok
@@ -214,12 +222,13 @@ compile_each([Source | Rest], Config, Env, NewBins, ExistingBins) ->
             ?CONSOLE("Compiling ~s\n", [Source]),
             case compiler(Ext) of
                 "$CC" ->
-                    rebar_utils:sh(?FMT("$CC -c $CFLAGS $DRV_CFLAGS ~s -o ~s",
-                                        [Source, Bin]), [{env, Env}]);
+                    rebar_utils:sh(expand_command("REBAR_CC_TEMPLATE", Env,
+                                                  Source, Bin),
+                                   [{env, Env}]);
                 "$CXX" ->
-                    rebar_utils:sh(
-                      ?FMT("$CXX -c $CXXFLAGS $DRV_CFLAGS ~s -o ~s",
-                           [Source, Bin]), [{env, Env}])
+                    rebar_utils:sh(expand_command("REBAR_CXX_TEMPLATE", Env,
+                                                  Source, Bin),
+                                   [{env, Env}])
             end,
             compile_each(Rest, Config, Env, [Bin | NewBins], ExistingBins);
 
@@ -316,15 +325,23 @@ expand_vars(Key, Value, Vars) ->
       end,
       [], Vars).
 
+expand_command(TmplName, Env, InFiles, OutFile) ->
+    Cmd0 = proplists:get_value(TmplName, Env),
+    Cmd1 = expand_env_variable(Cmd0, "REBAR_PORT_IN_FILES", InFiles),
+    Cmd2 = expand_env_variable(Cmd1, "REBAR_PORT_OUT_FILE", OutFile),
+    re:replace(Cmd2, "\\\$\\w+|\\\${\\w+}", "", [global, {return, list}]).
 
 %%
 %% Given env. variable FOO we want to expand all references to
 %% it in InStr. References can have two forms: $FOO and ${FOO}
+%% The end of form $FOO is delimited with whitespace or eol
 %%
 expand_env_variable(InStr, VarName, VarValue) ->
-    R1 = re:replace(InStr, "\\\$" ++ VarName, VarValue),
-    re:replace(R1, "\\\${" ++ VarName ++ "}", VarValue, [{return, list}]).
-
+    R1 = re:replace(InStr, "\\\$" ++ VarName ++ "\\s", VarValue ++ " ",
+                    [global]),
+    R2 = re:replace(R1, "\\\$" ++ VarName ++ "\$", VarValue),
+    re:replace(R2, "\\\${" ++ VarName ++ "}", VarValue,
+               [global, {return, list}]).
 
 %%
 %% Filter a list of env vars such that only those which match the provided
@@ -349,17 +366,28 @@ erts_dir() ->
 os_env() ->
     Os = [list_to_tuple(re:split(S, "=", [{return, list}, {parts, 2}])) ||
              S <- os:getenv()],
-    lists:keydelete([],1,Os). %% Remove Windows current disk and path
+    lists:filter(fun({[], _}) -> false;
+                    (_) -> true
+                 end, Os). %% Remove variables without a name (Windows)
 
 default_env() ->
+    EiInclude = code:lib_dir(erl_interface, include),
+    ErtsInclude = filename:join(erts_dir(), "include"),
+    EiLib = code:lib_dir(erl_interface, lib),
     [
+     {"REBAR_CXX_TEMPLATE",
+      "$CXX -c $CXXFLAGS $DRV_CFLAGS $REBAR_PORT_IN_FILES -o $REBAR_PORT_OUT_FILE"},
+     {"REBAR_CC_TEMPLATE",
+      "$CC -c $CFLAGS $DRV_CFLAGS $REBAR_PORT_IN_FILES -o $REBAR_PORT_OUT_FILE"},
+     {"REBAR_LINK_TEMPLATE",
+      "$CC $REBAR_PORT_IN_FILES $LDFLAGS $DRV_LDFLAGS -o $REBAR_PORT_OUT_FILE"},
      {"CC", "cc"},
      {"CXX", "c++"},
-     {"ERL_CFLAGS", lists:concat([" -I", code:lib_dir(erl_interface, include),
-                                  " -I", filename:join(erts_dir(), "include"),
+     {"ERL_CFLAGS", lists:concat([" -I", EiInclude,
+                                  " -I", ErtsInclude,
                                   " "])},
-     {"ERL_LDFLAGS", lists:concat([" -L", code:lib_dir(erl_interface, lib),
-                                   " -lerl_interface -lei"])},
+     {"ERL_EI_LIBDIR", EiLib},
+     {"ERL_LDFLAGS", " -L$ERL_EI_LIBDIR -lerl_interface -lei"},
      {"DRV_CFLAGS", "-g -Wall -fPIC $ERL_CFLAGS"},
      {"DRV_LDFLAGS", "-shared $ERL_LDFLAGS"},
      {"darwin", "DRV_LDFLAGS",
