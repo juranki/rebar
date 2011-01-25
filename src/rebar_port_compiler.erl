@@ -62,12 +62,12 @@
 %%               DRV_CFLAGS  - flags that will be used for compiling the driver
 %%               DRV_LDFLAGS - flags that will be used for linking the driver
 %%               ERL_EI_LIBDIR - ei library directory
-%%               REBAR_CXX_TEMPLATE  - C++ command template
-%%               REBAR_CC_TEMPLATE   - C command template
-%%               REBAR_LINK_TEMPLATE - Linker command template
-%%               REBAR_PORT_IN_FILES - contains a space separated list of input
+%%               CXX_TEMPLATE  - C++ command template
+%%               CC_TEMPLATE   - C command template
+%%               LINK_TEMPLATE - Linker command template
+%%               PORT_IN_FILES - contains a space separated list of input
 %%                    file(s), (used in command template)
-%%               REBAR_PORT_OUT_FILE - contains the output filename (used in
+%%               PORT_OUT_FILE - contains the output filename (used in
 %%                    command template)
 %%
 %%               Note that if you wish to extend (vs. replace) these variables,
@@ -134,7 +134,7 @@ compile(Config, AppFile) ->
                       Intersection = sets:intersection(AllBins),
                       case needs_link(SoName, sets:to_list(Intersection)) of
                           true ->
-                              rebar_utils:sh(expand_command("REBAR_LINK_TEMPLATE", Env,
+                              rebar_utils:sh(expand_command("LINK_TEMPLATE", Env,
                                                             string:join(Bins, " "),
                                                             SoName),
                                              [{env, Env}]);
@@ -222,11 +222,11 @@ compile_each([Source | Rest], Config, Env, NewBins, ExistingBins) ->
             ?CONSOLE("Compiling ~s\n", [Source]),
             case compiler(Ext) of
                 "$CC" ->
-                    rebar_utils:sh(expand_command("REBAR_CC_TEMPLATE", Env,
+                    rebar_utils:sh(expand_command("CC_TEMPLATE", Env,
                                                   Source, Bin),
                                    [{env, Env}]);
                 "$CXX" ->
-                    rebar_utils:sh(expand_command("REBAR_CXX_TEMPLATE", Env,
+                    rebar_utils:sh(expand_command("CXX_TEMPLATE", Env,
                                                   Source, Bin),
                                    [{env, Env}])
             end,
@@ -327,8 +327,8 @@ expand_vars(Key, Value, Vars) ->
 
 expand_command(TmplName, Env, InFiles, OutFile) ->
     Cmd0 = proplists:get_value(TmplName, Env),
-    Cmd1 = expand_env_variable(Cmd0, "REBAR_PORT_IN_FILES", InFiles),
-    Cmd2 = expand_env_variable(Cmd1, "REBAR_PORT_OUT_FILE", OutFile),
+    Cmd1 = expand_env_variable(Cmd0, "PORT_IN_FILES", InFiles),
+    Cmd2 = expand_env_variable(Cmd1, "PORT_OUT_FILE", OutFile),
     re:replace(Cmd2, "\\\$\\w+|\\\${\\w+}", "", [global, {return, list}]).
 
 %%
@@ -375,12 +375,12 @@ default_env() ->
     ErtsInclude = filename:join(erts_dir(), "include"),
     EiLib = code:lib_dir(erl_interface, lib),
     [
-     {"REBAR_CXX_TEMPLATE",
-      "$CXX -c $CXXFLAGS $DRV_CFLAGS $REBAR_PORT_IN_FILES -o $REBAR_PORT_OUT_FILE"},
-     {"REBAR_CC_TEMPLATE",
-      "$CC -c $CFLAGS $DRV_CFLAGS $REBAR_PORT_IN_FILES -o $REBAR_PORT_OUT_FILE"},
-     {"REBAR_LINK_TEMPLATE",
-      "$CC $REBAR_PORT_IN_FILES $LDFLAGS $DRV_LDFLAGS -o $REBAR_PORT_OUT_FILE"},
+     {"CXX_TEMPLATE",
+      "$CXX -c $CXXFLAGS $DRV_CFLAGS $PORT_IN_FILES -o $PORT_OUT_FILE"},
+     {"CC_TEMPLATE",
+      "$CC -c $CFLAGS $DRV_CFLAGS $PORT_IN_FILES -o $PORT_OUT_FILE"},
+     {"LINK_TEMPLATE",
+      "$CC $PORT_IN_FILES $LDFLAGS $DRV_LDFLAGS -o $PORT_OUT_FILE"},
      {"CC", "cc"},
      {"CXX", "c++"},
      {"ERL_CFLAGS", lists:concat([" -I", EiInclude,
