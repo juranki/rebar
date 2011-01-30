@@ -326,10 +326,15 @@ expand_vars(Key, Value, Vars) ->
       [], Vars).
 
 expand_command(TmplName, Env, InFiles, OutFile) ->
-    Cmd0 = proplists:get_value(TmplName, Env),
-    Cmd1 = expand_env_variable(Cmd0, "PORT_IN_FILES", InFiles),
-    Cmd2 = expand_env_variable(Cmd1, "PORT_OUT_FILE", OutFile),
-    re:replace(Cmd2, "\\\$\\w+|\\\${\\w+}", "", [global, {return, list}]).
+    Cmd = proplists:get_value(TmplName, Env),
+    Env1 = [{"PORT_IN_FILES", InFiles},
+            {"PORT_OUT_FILE", OutFile}
+            | Env],
+    Env2 = lists:map(fun({K, V}) ->
+                             {list_to_atom(K), V}
+                     end, Env1),
+    Ctx = dict:from_list(Env2),
+    mustache:render(Cmd, Ctx).
 
 %%
 %% Given env. variable FOO we want to expand all references to
@@ -376,11 +381,11 @@ default_env() ->
     EiLib = code:lib_dir(erl_interface, lib),
     [
      {"CXX_TEMPLATE",
-      "$CXX -c $CXXFLAGS $DRV_CFLAGS $PORT_IN_FILES -o $PORT_OUT_FILE"},
+      "{{'CXX'}} -c {{'CXXFLAGS'}} {{'DRV_CFLAGS'}} {{'PORT_IN_FILES'}} -o {{'PORT_OUT_FILE'}}"},
      {"CC_TEMPLATE",
-      "$CC -c $CFLAGS $DRV_CFLAGS $PORT_IN_FILES -o $PORT_OUT_FILE"},
+      "{{'CC'}} -c {{'CFLAGS'}} {{'DRV_CFLAGS'}} {{'PORT_IN_FILES'}} -o {{'PORT_OUT_FILE'}}"},
      {"LINK_TEMPLATE",
-      "$CC $PORT_IN_FILES $LDFLAGS $DRV_LDFLAGS -o $PORT_OUT_FILE"},
+      "{{'CC'}} {{'PORT_IN_FILES'}} {{'LDFLAGS'}} {{'DRV_LDFLAGS'}} -o {{'PORT_OUT_FILE'}}"},
      {"CC", "cc"},
      {"CXX", "c++"},
      {"ERL_CFLAGS", lists:concat([" -I", EiInclude,
