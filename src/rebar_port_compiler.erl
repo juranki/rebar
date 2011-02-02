@@ -59,9 +59,6 @@
 %%               DRV_CFLAGS  - flags that will be used for compiling the driver
 %%               DRV_LDFLAGS - flags that will be used for linking the driver
 %%               ERL_EI_LIBDIR - ei library directory
-%%               CXX_TEMPLATE  - C++ command template
-%%               CC_TEMPLATE   - C command template
-%%               LINK_TEMPLATE - Linker command template
 %%               PORT_IN_FILES - contains a space separated list of input
 %%                    file(s), (used in command template)
 %%               PORT_OUT_FILE - contains the output filename (used in
@@ -85,6 +82,12 @@
 %% * port_cleanup_script - String that specifies a script to run during cleanup. Use this to remove
 %%                         files/directories created by port_pre_script.
 %%
+%% * port_cmd_templates - List of command line templates of form {Id, Template}
+%%                        or {ArchRegex, Id, Template}.
+%%                         ArchRegex = regex matched against system architecture
+%%                         Id = oneof [cc, cxx, link]
+%%                         Template = a mustache template (string)
+%%
 
 compile(Config, AppFile) ->
     %% Compose list of sources from config file -- defaults to c_src/*.c
@@ -99,12 +102,19 @@ compile(Config, AppFile) ->
             OverrideEnvs = filter_envs(rebar_config:get_list(Config, port_envs, []), []),
             Env = expand_vars_loop(merge_each_var(DefaultEnvs ++ OverrideEnvs ++ os_env(), [])),
 
+            ConfTemplates = expand_cmd_templates(
+                              rebar_config:get_list(Config, port_templates, []),
+                              []),
+            Templates = ConfTemplates ++ default_templates(),
+            LinkTemplate = proplists:get_value(link, Templates),
+
             %% One or more files are available for building. Run the pre-compile hook, if
             %% necessary.
             ok = run_precompile_hook(Config, Env),
 
             %% Compile each of the sources
-            {NewBins, ExistingBins} = compile_each(Sources, Config, Env, [], []),
+            {NewBins, ExistingBins} = compile_each(Sources, Config, Env,
+                                                   Templates, [], []),
 
             %% Construct the driver name and make sure priv/ exists
             SoSpecs = so_specs(Config, AppFile, NewBins ++ ExistingBins),
@@ -115,7 +125,7 @@ compile(Config, AppFile) ->
             lists:foreach(fun({SoName,Bins}) ->
                 case needs_link(SoName, sets:to_list(sets:intersection([sets:from_list(Bins),sets:from_list(NewBins)]))) of
                   true ->
-                    rebar_utils:sh(expand_command("LINK_TEMPLATE", Env,
+                    rebar_utils:sh(expand_command(LinkTemplate, Env,
                                                   string:join(Bins, " "),
                                                   SoName),
                                    [{env, Env}]);
@@ -165,6 +175,18 @@ expand_objects(Sources) ->
     [filename:join([filename:dirname(F), filename:basename(F) ++ ".o"])
      || F <- Sources].
 
+expand_cmd_templates([], Acc) ->
+    Acc;
+expand_cmd_templates([{Id, Template} | Rest], Acc) ->
+    expand_cmd_templates(Rest, [{Id, Template} | Acc]);
+expand_cmd_templates([{ArchRegex, Id, Template} | Rest], Acc) ->
+    case rebar_utils:is_arch(ArchRegex) of
+        true ->
+            expand_cmd_templates(Rest, [{Id, Template} | Acc]);
+        false ->
+            expand_cmd_templates(Rest, Acc)
+    end.
+
 run_precompile_hook(Config, Env) ->
     case rebar_config:get(Config, port_pre_script, undefined) of
         undefined ->
@@ -191,29 +213,25 @@ run_cleanup_hook(Config) ->
     end.
 
 
-compile_each([], _Config, _Env, NewBins, ExistingBins) ->
+compile_each([], _Config, _Env, _Templates, NewBins, ExistingBins) ->
     {lists:reverse(NewBins), lists:reverse(ExistingBins)};
-compile_each([Source | Rest], Config, Env, NewBins, ExistingBins) ->
+compile_each([Source | Rest], Config, Env, Templates, NewBins, ExistingBins) ->
     Ext = filename:extension(Source),
     Bin = filename:rootname(Source, Ext) ++ ".o",
     case needs_compile(Source, Bin) of
         true ->
             ?CONSOLE("Compiling ~s\n", [Source]),
-            case compiler(Ext) of
-                "$CC" ->
-                    rebar_utils:sh(expand_command("CC_TEMPLATE", Env,
-                                                  Source, Bin),
-                                   [{env, Env}]);
-                "$CXX" ->
-                    rebar_utils:sh(expand_command("CXX_TEMPLATE", Env,
-                                                  Source, Bin),
-                                   [{env, Env}])
-            end,
-            compile_each(Rest, Config, Env, [Bin | NewBins], ExistingBins);
+            CompilerTemplate = proplists:get_value(compiler(Ext), Templates),
+            rebar_utils:sh(expand_command(CompilerTemplate, Env,
+                                          Source, Bin),
+                           [{env, Env}]),
+            compile_each(Rest, Config, Env, Templates,
+                         [Bin | NewBins], ExistingBins);
 
         false ->
             ?INFO("Skipping ~s\n", [Source]),
-            compile_each(Rest, Config, Env, NewBins, [Bin | ExistingBins])
+            compile_each(Rest, Config, Env, Templates,
+                         NewBins, [Bin | ExistingBins])
     end.
 
 
@@ -239,14 +257,14 @@ needs_link(SoName, NewBins) ->
 %%
 %% Choose a compiler variable, based on a provided extension
 %%
-compiler(".cc")  -> "$CXX";
-compiler(".cp")  -> "$CXX";
-compiler(".cxx") -> "$CXX";
-compiler(".cpp") -> "$CXX";
-compiler(".CPP") -> "$CXX";
-compiler(".c++") -> "$CXX";
-compiler(".C")   -> "$CXX";
-compiler(_)      -> "$CC".
+compiler(".cc")  -> cxx;
+compiler(".cp")  -> cxx;
+compiler(".cxx") -> cxx;
+compiler(".cpp") -> cxx;
+compiler(".CPP") -> cxx;
+compiler(".c++") -> cxx;
+compiler(".C")   -> cxx;
+compiler(_)      -> cc.
 
 
 %%
@@ -304,8 +322,7 @@ expand_vars(Key, Value, Vars) ->
                 end,
                 [], Vars).
 
-expand_command(TmplName, Env, InFiles, OutFile) ->
-    Cmd = proplists:get_value(TmplName, Env),
+expand_command(Template, Env, InFiles, OutFile) ->
     Env1 = [{"PORT_IN_FILES", InFiles},
             {"PORT_OUT_FILE", OutFile}
             | Env],
@@ -313,7 +330,7 @@ expand_command(TmplName, Env, InFiles, OutFile) ->
                              {list_to_atom(K), V}
                      end, Env1),
     Ctx = dict:from_list(Env2),
-    mustache:render(Cmd, Ctx).
+    mustache:render(Template, Ctx).
 
 %%
 %% Given env. variable FOO we want to expand all references to
@@ -353,17 +370,19 @@ os_env() ->
                     (_) -> true
                  end, Os). %% Remove variables without a name (Windows)
 
+default_templates() ->
+    [{cxx, ["{{'CXX'}} -c {{'CXXFLAGS'}} {{'DRV_CFLAGS'}} ",
+            "{{'PORT_IN_FILES'}} -o {{'PORT_OUT_FILE'}}"]},
+     {cc, ["{{'CC'}} -c {{'CFLAGS'}} {{'DRV_CFLAGS'}} ",
+           "{{'PORT_IN_FILES'}} -o {{'PORT_OUT_FILE'}}"]},
+     {link, ["{{'CC'}} {{'PORT_IN_FILES'}} {{'LDFLAGS'}} ",
+             "{{'DRV_LDFLAGS'}} -o {{'PORT_OUT_FILE'}}"]}].
+
 default_env() ->
     EiInclude = code:lib_dir(erl_interface, include),
     ErtsInclude = filename:join(erts_dir(), "include"),
     EiLib = code:lib_dir(erl_interface, lib),
     [
-     {"CXX_TEMPLATE",
-      "{{'CXX'}} -c {{'CXXFLAGS'}} {{'DRV_CFLAGS'}} {{'PORT_IN_FILES'}} -o {{'PORT_OUT_FILE'}}"},
-     {"CC_TEMPLATE",
-      "{{'CC'}} -c {{'CFLAGS'}} {{'DRV_CFLAGS'}} {{'PORT_IN_FILES'}} -o {{'PORT_OUT_FILE'}}"},
-     {"LINK_TEMPLATE",
-      "{{'CC'}} {{'PORT_IN_FILES'}} {{'LDFLAGS'}} {{'DRV_LDFLAGS'}} -o {{'PORT_OUT_FILE'}}"},
      {"CC", "cc"},
      {"CXX", "c++"},
      {"ERL_CFLAGS", lists:concat([" -I", EiInclude,
