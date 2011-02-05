@@ -76,8 +76,20 @@
 %%
 %%               {port_envs, [{"x86_64.*-linux", "CFLAGS", "$CFLAGS -X86Options"}]}
 %%
-%% * port_pre_script - Tuple which specifies a pre-compilation script to run, and a filename that
-%%                     exists as a result of the script running.
+%% * port_pre_script - List of tuples, which specify a pre-compilation script to
+%%                     run, and a filename that exists as a result of the script
+%%                     running. First element of a 3-tuple is a regex that
+%%                     specifies the architecture for the script.
+%%                     The first matching script is run. If the regex is omitted,
+%%                     the script always matches (a catchall)
+%%
+%%                     {port_pre_script, [{"win32", "script.bat", "skipfile"},
+%%                                        {"script.sh", "skipfile"}]}.
+%%
+%%                     If architecture matching is not needed, a single 2-tuple
+%%                     can be used.
+%%
+%%                     {port_pre_script, {"script.sh", "skipfile"}}.
 %%
 %% * port_cleanup_script - String that specifies a script to run during cleanup. Use this to remove
 %%                         files/directories created by port_pre_script.
@@ -110,7 +122,8 @@ compile(Config, AppFile) ->
 
             %% One or more files are available for building. Run the pre-compile hook, if
             %% necessary.
-            ok = run_precompile_hook(Config, Env),
+            PreScripts = rebar_config:get(Config, port_pre_script, []),
+            ok = run_precompile_hook(PreScripts, Env),
 
             %% Compile each of the sources
             {NewBins, ExistingBins} = compile_each(Sources, Config, Env,
@@ -187,19 +200,27 @@ expand_cmd_templates([{ArchRegex, Id, Template} | Rest], Acc) ->
             expand_cmd_templates(Rest, Acc)
     end.
 
-run_precompile_hook(Config, Env) ->
-    case rebar_config:get(Config, port_pre_script, undefined) of
-        undefined ->
+run_precompile_hook([], _Env) -> 
+    ok;
+run_precompile_hook([{ArchRegex, Script, BypassFileName} | Rest], Env) ->
+    case rebar_utils:is_arch(ArchRegex) of
+        true ->
+            % Found a matching script, run it, and forget the rest
+            run_precompile_hook({Script, BypassFileName}, Env);
+        false ->
+            run_precompile_hook(Rest, Env)
+    end;
+run_precompile_hook([ScriptSpec | _Rest], Env) ->
+    % A script without matching script , run it, and forget the rest
+    run_precompile_hook(ScriptSpec, Env);
+run_precompile_hook({Script, BypassFileName}, Env) ->
+    case filelib:is_regular(BypassFileName) of
+        false ->
+            ?CONSOLE("Running ~s\n", [Script]),
+            {ok, _} = rebar_utils:sh(Script, [{env, Env}]),
             ok;
-        {Script, BypassFileName} ->
-            case filelib:is_regular(BypassFileName) of
-                false ->
-                    ?CONSOLE("Running ~s\n", [Script]),
-                    {ok, _} = rebar_utils:sh(Script, [{env, Env}]),
-                    ok;
-                true ->
-                    ?INFO("~s exists; not running ~s\n", [BypassFileName, Script])
-            end
+        true ->
+            ?INFO("~s exists; not running ~s\n", [BypassFileName, Script])
     end.
 
 run_cleanup_hook(Config) ->
