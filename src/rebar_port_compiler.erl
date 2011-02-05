@@ -392,12 +392,12 @@ os_env() ->
                  end, Os). %% Remove variables without a name (Windows)
 
 default_templates() ->
-    [{cxx, ["{{'CXX'}} -c {{'CXXFLAGS'}} {{'DRV_CFLAGS'}} ",
-            "{{'PORT_IN_FILES'}} -o {{'PORT_OUT_FILE'}}"]},
-     {cc, ["{{'CC'}} -c {{'CFLAGS'}} {{'DRV_CFLAGS'}} ",
-           "{{'PORT_IN_FILES'}} -o {{'PORT_OUT_FILE'}}"]},
-     {link, ["{{'CC'}} {{'PORT_IN_FILES'}} {{'LDFLAGS'}} ",
-             "{{'DRV_LDFLAGS'}} -o {{'PORT_OUT_FILE'}}"]}].
+    [{cxx, "{{'CXX'}} -c {{'CXXFLAGS'}} {{'DRV_CFLAGS'}} " ++
+      "{{'PORT_IN_FILES'}} -o {{'PORT_OUT_FILE'}}"},
+     {cc, "{{'CC'}} -c {{'CFLAGS'}} {{'DRV_CFLAGS'}} " ++
+      "{{'PORT_IN_FILES'}} -o {{'PORT_OUT_FILE'}}"},
+     {link, "{{'CC'}} {{'PORT_IN_FILES'}} {{'LDFLAGS'}} " ++
+      "{{'DRV_LDFLAGS'}} -o {{'PORT_OUT_FILE'}}"}].
 
 default_env() ->
     EiInclude = code:lib_dir(erl_interface, include),
