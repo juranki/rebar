@@ -450,8 +450,11 @@ switch_so_to_dll(Orig = {Name, Spec}) ->
     case filename:extension(Name) of
         ".so" ->
             {filename:rootname(Name, ".so") ++ ".dll", Spec};
+        [] ->
+            %% No extension, assume executable
+            {Name ++ ".exe", Spec};
         _ ->
-            %% Not a .so; leave it
+            %% Something else, leave as is
             Orig
     end.
 
