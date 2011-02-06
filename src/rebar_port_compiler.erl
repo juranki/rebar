@@ -114,7 +114,7 @@ compile(Config, AppFile) ->
             RawEnv = DefaultEnvs ++ OverrideEnvs ++ os_env(),
             Env = expand_vars_loop(merge_each_var(RawEnv, [])),
 
-            ConfTemplates = expand_cmd_templates(
+            ConfTemplates = filter_cmd_templates(
                               rebar_config:get_list(Config, port_templates, []),
                               []),
             Templates = ConfTemplates ++ default_templates(),
@@ -193,18 +193,6 @@ expand_sources([Spec | Rest], Acc) ->
 expand_objects(Sources) ->
     [filename:join([filename:dirname(F), filename:basename(F) ++ ".o"])
      || F <- Sources].
-
-expand_cmd_templates([], Acc) ->
-    Acc;
-expand_cmd_templates([{Id, Template} | Rest], Acc) ->
-    expand_cmd_templates(Rest, [{Id, Template} | Acc]);
-expand_cmd_templates([{ArchRegex, Id, Template} | Rest], Acc) ->
-    case rebar_utils:is_arch(ArchRegex) of
-        true ->
-            expand_cmd_templates(Rest, [{Id, Template} | Acc]);
-        false ->
-            expand_cmd_templates(Rest, Acc)
-    end.
 
 run_precompile_hook(Config, Env) ->
     case rebar_config:get(Config, port_pre_script, undefined) of
@@ -346,9 +334,7 @@ expand_command(Template, Env, InFiles, OutFile) ->
     Env1 = [{"PORT_IN_FILES", InFiles},
             {"PORT_OUT_FILE", OutFile}
             | Env],
-    Env2 = lists:map(fun({K, V}) ->
-                             {list_to_atom(K), V}
-                     end, Env1),
+    Env2 = [{list_to_atom(K), V} || {K, V} <- Env1],
     Ctx = dict:from_list(Env2),
     mustache:render(Template, Ctx).
 
@@ -381,15 +367,25 @@ filter_envs([{Key, Value} | Rest], Acc) ->
     filter_envs(Rest, [{Key, Value} | Acc]).
 
 
+filter_cmd_templates([], Acc) ->
+    Acc;
+filter_cmd_templates([{Id, Template} | Rest], Acc) ->
+    filter_cmd_templates(Rest, [{Id, Template} | Acc]);
+filter_cmd_templates([{ArchRegex, Id, Template} | Rest], Acc) ->
+    case rebar_utils:is_arch(ArchRegex) of
+        true ->
+            filter_cmd_templates(Rest, [{Id, Template} | Acc]);
+        false ->
+            filter_cmd_templates(Rest, Acc)
+    end.
+
 erts_dir() ->
     lists:concat([code:root_dir(), "/erts-", erlang:system_info(version)]).
 
 os_env() ->
     Os = [list_to_tuple(re:split(S, "=", [{return, list}, {parts, 2}])) ||
              S <- os:getenv()],
-    lists:filter(fun({[], _}) -> false;
-                    (_) -> true
-                 end, Os). %% Remove variables without a name (Windows)
+    [{K, V} || {K, V} <- Os, K =/= []]. %% Drop variables without a name (Win32)
 
 default_templates() ->
     [{cxx, "{{'CXX'}} -c {{'CXXFLAGS'}} {{'DRV_CFLAGS'}} " ++
