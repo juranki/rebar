@@ -64,7 +64,7 @@ new(ParentConfig) ->
                    
                    %% Replace terms of form {test, ...} with values generated
                    %% by functions in configure.erl
-                   Terms2 = apply_platform_tests(Terms),
+                   Terms2 = apply_configuration_tests(Terms),
 
                    %% We need to
                    %% be able to distinguish between local definitions
@@ -131,41 +131,41 @@ local_opts([local | _Rest], Acc) ->
 local_opts([Item | Rest], Acc) ->
     local_opts(Rest, [Item | Acc]).
 
-apply_platform_tests(Terms) ->
-    case find_platform_tests(Terms, []) of
+apply_configuration_tests(Terms) ->
+    case find_configuration_tests(Terms, []) of
         [] ->
             Terms;
         Tests ->
             case cache_status() of
                 create ->
-                    ?CONSOLE("Creating platform configuration cache.~n", []),
-                    ok = create_platform_cache(Tests);
+                    ?CONSOLE("Creating configuration cache.~n", []),
+                    ok = create_configuration_cache(Tests);
                 update ->
-                    ?CONSOLE("Updating platform configuration cache.~n", []),
+                    ?CONSOLE("Updating configuration cache.~n", []),
                     ok = file:delete("rebar.cache"),
-                    ok = create_platform_cache(Tests);
+                    ok = create_configuration_cache(Tests);
                 ok ->
                     ok
             end,
-            replace_platform_values(Terms)
+            replace_configuration_values(Terms)
     end.
 
-find_platform_tests([], Acc) ->
+find_configuration_tests([], Acc) ->
     Acc;
-find_platform_tests([{test, Fun, Args} | Rest], Acc) ->
+find_configuration_tests([{test, Fun, Args} | Rest], Acc) ->
     Acc2 = case lists:member({Fun, Args}, Acc) of
                true ->
                    Acc;
                false ->
                    [{Fun, Args} | Acc]
            end,
-    find_platform_tests(Rest, Acc2);
-find_platform_tests([Term | Rest], Acc) when is_list(Term) ->
-    find_platform_tests(Term ++ Rest, Acc);
-find_platform_tests([Term | Rest], Acc) when is_tuple(Term) ->
-    find_platform_tests(tuple_to_list(Term) ++ Rest, Acc);
-find_platform_tests([_Term | Rest], Acc) ->
-    find_platform_tests(Rest, Acc).
+    find_configuration_tests(Rest, Acc2);
+find_configuration_tests([Term | Rest], Acc) when is_list(Term) ->
+    find_configuration_tests(Term ++ Rest, Acc);
+find_configuration_tests([Term | Rest], Acc) when is_tuple(Term) ->
+    find_configuration_tests(tuple_to_list(Term) ++ Rest, Acc);
+find_configuration_tests([_Term | Rest], Acc) ->
+    find_configuration_tests(Rest, Acc).
 
 cache_status() ->
     Cache = filelib:last_modified("rebar.cache"), %% 0 if not found
@@ -178,7 +178,7 @@ cache_status() ->
         true -> ok
     end.
 
-create_platform_cache(Tests) ->
+create_configuration_cache(Tests) ->
     case compile:file("configure", [binary, debug_info, report]) of
         {ok, _, Bin} ->
             {module, _} = code:load_binary(configure, "configure", Bin),
@@ -189,30 +189,30 @@ create_platform_cache(Tests) ->
             true = code:delete(configure),
             ok;
         _ -> 
-            ?ABORT("Failed to compile platform tests.", [])
+            ?ABORT("Failed to compile configuration tests.", [])
     end.
 
-replace_platform_values(ConfigTerms) ->
+replace_configuration_values(ConfigTerms) ->
     case file:consult("rebar.cache") of
         {ok, CacheTerms} ->
-            replace_platform_values(ConfigTerms, CacheTerms, []);
+            replace_configuration_values(ConfigTerms, CacheTerms, []);
         _ ->
             ?ABORT("Failed to read rebar.cache.", [])
     end.
 
-replace_platform_values([], _, Acc) ->
+replace_configuration_values([], _, Acc) ->
     lists:reverse(Acc);
-replace_platform_values([{test, Fun, Args} | Rest], ConfigTerms, Acc) ->
-    replace_platform_values(Rest, ConfigTerms,
+replace_configuration_values([{test, Fun, Args} | Rest], ConfigTerms, Acc) ->
+    replace_configuration_values(Rest, ConfigTerms,
                             [proplists:get_value({Fun, Args}, ConfigTerms)
                              | Acc]);
-replace_platform_values([Term | Rest], ConfigTerms, Acc) when is_list(Term) ->
-    List = replace_platform_values(Term, ConfigTerms, []),
-    replace_platform_values(Rest, ConfigTerms,
+replace_configuration_values([Term | Rest], ConfigTerms, Acc) when is_list(Term) ->
+    List = replace_configuration_values(Term, ConfigTerms, []),
+    replace_configuration_values(Rest, ConfigTerms,
                             [List | Acc]);
-replace_platform_values([Term | Rest], ConfigTerms, Acc) when is_tuple(Term) ->
+replace_configuration_values([Term | Rest], ConfigTerms, Acc) when is_tuple(Term) ->
     Tuple = list_to_tuple(
-              replace_platform_values(tuple_to_list(Term), ConfigTerms, [])),
-    replace_platform_values(Rest, ConfigTerms, [Tuple | Acc]);
-replace_platform_values([Term | Rest], ConfigTerms, Acc) ->
-    replace_platform_values(Rest, ConfigTerms, [Term | Acc]).
+              replace_configuration_values(tuple_to_list(Term), ConfigTerms, [])),
+    replace_configuration_values(Rest, ConfigTerms, [Tuple | Acc]);
+replace_configuration_values([Term | Rest], ConfigTerms, Acc) ->
+    replace_configuration_values(Rest, ConfigTerms, [Term | Acc]).
