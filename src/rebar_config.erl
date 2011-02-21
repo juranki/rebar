@@ -138,12 +138,12 @@ apply_configuration_tests(Terms) ->
         Tests ->
             case cache_status() of
                 create ->
-                    ok = create_configuration_cache(Tests);
-                    ?CONSOLE("Created configuration cache.~n", []),
+                    ok = create_configuration_cache(Tests),
+                    ?CONSOLE("Created configuration cache.~n", []);
                 update ->
                     ok = file:delete("rebar.cache"),
-                    ok = create_configuration_cache(Tests);
-                    ?CONSOLE("Updated configuration cache.~n", []),
+                    ok = create_configuration_cache(Tests),
+                    ?CONSOLE("Updated configuration cache.~n", []);
                 ok ->
                     ok
             end,
